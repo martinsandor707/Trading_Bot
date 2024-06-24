@@ -9,8 +9,8 @@ from datetime import datetime, timezone
 
 def download_data():
   bitvavo = Bitvavo()
-  start = datetime(year=2017, month=6, day=30, hour=0, minute=0, tzinfo=timezone.utc)
-  end   = datetime(year=2022, month=6, day=30, hour=0, minute=0, tzinfo=timezone.utc)
+  start = datetime(year=2018, month=6, day=30, hour=0, minute=0, tzinfo=timezone.utc)
+  end   = datetime(year=2023, month=6, day=30, hour=0, minute=0, tzinfo=timezone.utc)
   candles = bitvavo.candles('BTC-EUR', '1d', start=start, end=end)
   data=pd.DataFrame(candles, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
   data.set_index(data['timestamp'], inplace=True)
@@ -31,7 +31,7 @@ def load_df_from_csv(path:str):
   return data
 
 #%%
-#download_data()
+download_data()
 downloaded_data=load_df_from_csv("Bitcoin_prices.csv")
 data=downloaded_data.copy().iloc[::-1] #Reverse rows because bitvavo gives data from newest to oldest by default, we need the opposite
 
