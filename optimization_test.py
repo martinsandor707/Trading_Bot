@@ -78,7 +78,7 @@ class MyStrat(Strategy):
 bt = Backtest(data_copy, MyStrat, cash=10000, margin=1/10, commission=.000)
 stats, heatmap = bt.optimize(
     fast_sma_len=range(5,150,5),
-    slow_sma_len=range(20,200,10),
+    slow_sma_len=range(20,210,10),
     maximize='Return [%]', max_tries=1000,
     random_state=0,
     return_heatmap=True)
@@ -86,7 +86,6 @@ stats, heatmap = bt.optimize(
 #%% Plotting heatmap of results
 import seaborn as sns
 import matplotlib.pyplot as plt
-import pandas as pd
 
 # Convert multiindex series to dataframe
 # (AKA graph plotting magic)
