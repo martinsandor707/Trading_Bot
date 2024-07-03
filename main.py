@@ -1,11 +1,26 @@
-import sys
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import technical_analysis.moving_average as ma
-from technical_analysis import indicators
+from pandas_ta.overlap import supertrend as st
 from python_bitvavo_api.bitvavo import Bitvavo
 from datetime import datetime, timezone
+
+"""
+Kézzel írt backtesting fájl, borzasztó tökölős volt, de irónikus módon ez mégis jobban
+működik mint bármelyik könyvtár amit eddig backtestingre használtam.
+Faék egyszerű, sok helyet foglal, cserébe megbízható, nincs benne mágia.
+
+Arra tökéletes, hogy elképzeléseket próbálgasson az ember, vagy lássa, hogy valami
+alapból is hülyeség lenne. Csak kiszámolod az indikátort, átírod a
+buy/sell_condition metódusokat, és már működik is.
+
+Hátrány: Még mindig nem tudunk könyvtár nélkül optimalizálni
+
+
+!!! FONTOS: Ez végső soron egy crypto trading bot lesz, és a Bitvavo nem enged
+ shortolni, szóval minden stratégiánál vegyük figyelembe, hogy csakis longgal
+ számolhatunk! Alapértelmezett tranzakciós díj 0.25%, de befektetett pénzzel csökken.
+"""
 
 def download_data():
   bitvavo = Bitvavo()
@@ -31,7 +46,7 @@ def load_df_from_csv(path:str):
   return data
 
 #%%
-download_data()
+#download_data()
 downloaded_data=load_df_from_csv("Bitcoin_prices.csv")
 data=downloaded_data.copy().iloc[::-1] #Reverse rows because bitvavo gives data from newest to oldest by default, we need the opposite
 
@@ -46,19 +61,19 @@ data=downloaded_data.copy().iloc[::-1] #Reverse rows because bitvavo gives data 
 #    row_string = ',\t'.join(row_values)
     # Print the row string
 #    print(row_string)
-#%%
-#Indicators
-data['MA-st'] = ma.sma(data['close'], 100)
-data['MA-lt'] = ma.sma(data['close'], 200)
-data['rsi'] = indicators.rsi(data['close'], period=14)
-data.dropna(inplace=True)
-
+#%% Indicators
+length=10
+multiplier=3
+data=pd.concat([data, st(data['high'], data['low'], data['close'], length, multiplier)], axis=1)
+#data.dropna(inplace=True)
+data.columns = ['open', 'high','low','close','volume','trend','direction','long','short']
+data=data.iloc[length:]
 
 #%%
 ################################ Backtest ################################
 starting_eur = 1000
 staring_coin = 0
-trading_fees = 0.001
+trading_fees = 0.0025
 
 eur = starting_eur
 coin = staring_coin
@@ -68,10 +83,10 @@ buyhold = [] #Our wallet if we just spent all our money on coins in the beginnin
 
 
 def buy_condition(row):
-  return row['MA-st'] > row['MA-lt']
+  return row['long'] and pd.isna(row['short'])
 
 def sell_condition(row):
-  return row['MA-lt'] > row['MA-st']
+  return row['short'] and pd.isna(row['long'])
 #Backtest loop
 
 for index, row in data.iterrows():
@@ -102,8 +117,8 @@ trades = pd.DataFrame(trades, columns=['Date', 'Action', 'Price', 'Coin', 'Eur',
 #%%
 #Results
 print(f"\nStarting amount: {starting_eur} EUR")
-print(f"Buy-hold: \t {buyhold[-1]} EUR\t ({(buyhold[-1]/starting_eur -1)*100}% profit")
-print(f"2-SMA: \t\t {wallet[-1]} EUR\t ({(wallet[-1]/starting_eur -1)*100}% profit")
+print(f"Buy-hold: \t\t\t\t {buyhold[-1]} EUR\t ({round((buyhold[-1]/starting_eur -1)*100,2)})% profit)")
+print(f"10-3 supertrend: \t\t {wallet[-1]} EUR\t ({round((wallet[-1]/starting_eur -1)*100,2)}% profit)")
 
 plt.figure(figsize=(10,6))
 plt.plot(

@@ -6,10 +6,29 @@ import pandas_ta as ta
 from sklearn.decomposition import PCA
 from sklearn.linear_model import LinearRegression
 
-#%% Fitting Linear regression model  on training set only
+"""
+TODO: Átírni ezt, hogy Supertrendet használjon
+
+TODO TODO: Még ha az optimizálásra találunk is backtesting könyvtárat, de
+tőzsdei gépi tanulásra még nem találtam semmit, csak random mélytanulásos/
+neurális hálós könyvtárakat, amik nevetségesen túlbonyolítják az egészet,
+és még egyetlen neurális hálós stratégiát sem láttam, ami érdemben képes pénzt
+keresni a tőzsdén
+
+Éppen ezért, ha tényleg nem találunk valakit aki már megcsinálta helyettünk,
+szerintem kéne írni egy átfogó StockMachineLearningModel osztályt, ami valamilyen
+csodával elrejti és áramvonalasítja azt a ~100 sor kódot amit itt írunk.
+A cél az lenne, hogy ne kelljen ezt az egész fájlt folyton újraírni minden új stratégia
+kipróbálásánál, hanem csak legyen egy metódus ami tanít, egy ami tesztel, és egy,
+ami kiértékeli, hogy a model szerint a legfrissebb gyertyánál mit kéne lépni.
+(Ezt az utóbbit fogjuk folyton újrahívni majd amikor élesben megy a bot)
+"""
+
+#%% Fitting Linear regression model on training set only
 
 #Download data
-spy = yf.download('BTC-USD', start='2010-01-01', end='2020-01-01')
+ticker='SPY'
+spy = yf.download(ticker, start='2000-01-01', end='2010-01-01')
 
 #Calculate RSI for periods 2 to 24
 rsi_columns = []
@@ -47,8 +66,8 @@ predictions_df = pd.DataFrame({'Date': pred_dates, 'Prediction': pred})
 
 # Thresholds
 
-l_thresh = np.quantile(pred, 0.9)
-s_thresh = np.quantile(pred, 0.1)
+l_thresh = np.quantile(pred, 0.8)
+s_thresh = np.quantile(pred, 0.2)
 
 predictions_df['Signal'] = 0
 predictions_df.loc[predictions_df['Prediction'] > l_thresh, 'Signal'] = 1
@@ -80,16 +99,16 @@ import matplotlib.pyplot as plt
 
 plt.figure(figsize=(12,8))
 plt.plot(cumulative_returns, label='Strategy Returns')
-plt.plot(spy_cumulative_returns, label='SPY Returns')
+plt.plot(spy_cumulative_returns, label=f'{ticker} Returns')
 plt.legend()
-plt.title('Cumulative Returns')
+plt.title('Training set')
 plt.xlabel('Date')
 plt.ylabel('Cumulative Return')
 plt.show()
 
 # %% Linear regression on test timeframe
 #Download data
-spy_test = yf.download('BTC-USD', start='2020-01-01', end='2023-01-01')
+spy_test = yf.download(ticker, start='2019-12-01', end='2023-01-01')
 
 #Calculate RSI for periods 2 to 24
 rsi_columns = []
@@ -147,14 +166,14 @@ spy_cumulative_returns_test = (1 +spy_test['Close'].pct_change()).cumprod() -1
 # Plot results
 import matplotlib.pyplot as plt
 
-print(f"Buy-hold: \t {spy_cumulative_returns_test[-1]} % profit")
-print(f"PCA RSI LinReg: \t {cumulative_returns_test[-1]} % profit")
+print(f"Buy-hold: \t {spy_cumulative_returns_test[-1]*100} % profit")
+print(f"PCA RSI LinReg: \t {cumulative_returns_test[-1]*100} % profit")
 
 plt.figure(figsize=(12,8))
 plt.plot(cumulative_returns_test, label='Strategy Returns')
-plt.plot(spy_cumulative_returns_test, label='SPY Returns')
+plt.plot(spy_cumulative_returns_test, label=f'{ticker} Returns')
 plt.legend()
-plt.title('Cumulative Returns')
+plt.title('Test set')
 plt.xlabel('Date')
 plt.ylabel('Cumulative Return')
 plt.show()

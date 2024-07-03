@@ -1,5 +1,20 @@
 # -*- coding: utf-8 -*-
+"""
+Egyelőre benthagyom referenciaként ha mégsem lenne jobb alternatíva,
+de jelenleg semmi ok nincs arra hogy ezt használjuk egy normális könyvtár helyett
 
+A lumibot előnye az, hogy natívan támogatják őt a vele partnerségben álló tőzsdék, és
+így kaphatsz egy félkész botot out-of-the-box. De tudtommal ezek mind amerikai tőzsdék, 
+szóval nekünk haszontalanok, plusz saját backtestet tudunk írni, nekünk az optimalizációban
+kell segítség, mert egy garázsprojektnél nem tudunk a semmiből írni egy absztrakt
+osztályhierarchiát ami tetszőleges stratégiákat modellez le +1000 lehetséges
+paraméterkombinációval.
+
+Az ilyesmit meghagyom a milliomos quant trading cégeknek
+
+Bónusz: a MyStrategy.backtest() futtatása lefagyasztja a Spydert, és csak
+feladatkezelővel lehet kilőni 🤡
+"""
 from datetime import datetime
 
 from lumibot.backtesting import YahooDataBacktesting

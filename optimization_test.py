@@ -1,5 +1,34 @@
 # -*- coding: utf-8 -*-
 # Libraries and global variables
+"""
+Először azt hittem hogy csak rosszul használom a könyvtárat, de most leteszteltem
+ugyanazt az alap supertrend stratégiát a bitcoin_prices.csv fájllal, és valamilyen 
+oknál fogva a backtesting könyvtár teljesen összeszarja magát a csere közben
+
+Ha lefuttatod az utolsó cellát és összehasonlítod azzal amit az általam írt main.py
+ad eredményül, akkor látszik, hogy nevetségesen rosszabb eredményeket produkál
+a bt.run() mint kellene. Nem tudom hogy kód szinten hol megy félre, de ha megnézed
+a btc_trades változót, akkor látszik, hogy minden cserét a kezdés után egy nappal
+automatikusan zár az algoritmus, majd még azon a napon újranyitja.
+
+Így, ahol a helyes backtesting-nek 31 cserét kéne eredményeznie (main.py),
+ott a bt.run 1333 darabbal-al tér vissza, az ablakon kidobva a kezelési költséget.
+
+Értelemszerűen ez így használhatatlan, ami fájdalmas, mert a bt.optimize nagyon
+hasznos és kényelmesen lett volna...
+
+Megpróbáltam jelenteni a hibát a készítőknek, de sajnos a GitHub repón utoljára
+2023 januárjában volt pusholva commit, úgyhogy kijelenthetjük hogy a projekt halott
+
+Sajnos annak semmi értelme, hogy egy ilyen garázsprojektnél elkezdjem megcsinálni
+a személyreszabott backtesting frameworkömet, úgyhogy az egyetlen alternatíva: 
+
+!!!!!!!!!!          TALÁLNI EGY ÚJ KÖNYVTÁRAT           !!!!!!!!!!
+
+Esetleg ezeken végigmenni? 
+https://github.com/kernc/backtesting.py/blob/master/doc/alternatives.md
+"""
+
 import yfinance as yf
 import pandas as pd
 import pandas_ta as ta
@@ -16,7 +45,7 @@ print(data.head())
 
 # Save to a CSV file (optional)
 data.to_csv(path)
-#%% Creation of dataframe with indicators (optionally add plotting graph here)
+#%% Creation of dataframe
 data = pd.read_csv(path)
 data['Date'] = pd.to_datetime(data['Date'], format='%Y-%m-%d')
 data.set_index(data['Date'], inplace=True)
@@ -26,6 +55,8 @@ data['High'] = pd.to_numeric(data['High'])
 data['Low'] = pd.to_numeric(data['Low'])
 data['Volume'] = pd.to_numeric(data['Volume'])
 data['Close'] = pd.to_numeric(data['Close'])
+
+#%% Calculation of indicators (optionally add plotting graph here)
 
 data['emaSlow'] = ta.ema(data['Close'], length=5)
 data['emaFast'] = ta.ema(data['Close'], length=20)
@@ -43,42 +74,46 @@ data=data[data.High!=data.Low]
 data.dropna(inplace=True)
 TotalSignal(data, emafast=data.emaFast, emaslow=data.emaSlow)
 
-#%% Backtesting with optimization
+#%% Creation of supertrend indicator
 data_copy=data[:].copy()
 
-data_copy['SMAFast'] = ta.sma(data_copy['Close'], length=5)
-data_copy['SMASlow'] = ta.sma(data_copy['Close'], length=20)
+length=10
+multiplier=3
+data_copy=pd.concat([data, ta.overlap.supertrend(data['High'], data['Low'], data['Close'], length, multiplier)], axis=1)
+data_copy.columns = ['Open', 'High','Low','Close', 'Adj Close','Volume','Trend','Direction','Long','Short']
+#data_copy=data_copy.iloc[length:]
 
-class MyStrat(Strategy):
-    fast_sma_len = 5
-    slow_sma_len = 20
+#%% Strategy and backtesting
+class BasicSupertrend(Strategy):
+    length = 10
+    multiplier = 3
     trade_size = 0.1    # A % of our equity
     
     def init(self):
-        data_copy['SMAFast'] = ta.sma(data_copy['Close'], length=self.fast_sma_len)
-        data_copy['SMASlow'] = ta.sma(data_copy['Close'], length=self.slow_sma_len)
-        self.fast_sma = self.I(lambda: data_copy['SMAFast'])
-        self.slow_sma = self.I(lambda: data_copy['SMASlow'])
+        data_copy=pd.concat([data, ta.overlap.supertrend(data['High'], data['Low'], data['Close'], self.length, self.multiplier)], axis=1)
+        data_copy.columns = ['Open', 'High','Low','Close', 'Adj Close','Volume','Trend','Direction','Long','Short']
+        self.long  = self.I(lambda: data_copy['Long'])
+        self.short = self.I(lambda: data_copy['Short'])
         
     def next(self):
-        if self.fast_sma[-1] > self.slow_sma[-1] and self.fast_sma[-2] <= self.slow_sma[-2]:
+        if self.long[-1] and pd.isna(self.short[-1]) and pd.isna(self.long[-2]) and self.short[-2]:
             for trade in self.trades:
                 if trade.is_short:
                     trade.close()               # Exit all shorts
             if len(self.trades) == 0:
                     self.buy(size=self.trade_size)   # Enter a long
                     
-        elif self.fast_sma[-1] < self.slow_sma[-1] and self.fast_sma[-2] >= self.slow_sma[-2]:
+        elif pd.isna(self.long[-1]) and self.short[-1] and self.long[-2] and pd.isna(self.short[-2]):
             for trade in self.trades:
                 if trade.is_long:
                     trade.close()               # Exit all longs
             if len(self.trades) == 0:
                     self.sell(size=self.trade_size) #Enter a short
             
-bt = Backtest(data_copy, MyStrat, cash=10000, margin=1/10, commission=.000)
+bt = Backtest(data_copy, BasicSupertrend, cash=1000, margin=1, commission=.000)
 stats, heatmap = bt.optimize(
-    fast_sma_len=range(5,150,5),
-    slow_sma_len=range(20,210,10),
+    length=range(7,21,1),
+    multiplier=range(1,5,1),
     maximize='Return [%]', max_tries=1000,
     random_state=0,
     return_heatmap=True)
@@ -93,3 +128,44 @@ heatmap_df = heatmap.unstack()
 plt.figure(figsize=(10, 8))
 sns.heatmap(heatmap_df, annot=True, cmap='viridis', fmt='.0f')
 plt.show()
+
+#%% Do the same with Bitcoin
+import pandas as pd
+import pandas_ta as ta
+from backtesting import Strategy, Backtest
+data = pd.read_csv("Bitcoin_prices.csv")
+data['timestamp'] = pd.to_datetime(data['timestamp'], unit='ms')
+data.set_index(data['timestamp'], inplace=True)
+del data['timestamp']
+btc = pd.DataFrame()
+btc['Open'] = pd.to_numeric(data['open'])
+btc['High'] = pd.to_numeric(data['high'])
+btc['Low'] = pd.to_numeric(data['low'])
+btc['Close'] = pd.to_numeric(data['close'])
+btc['Adj Close'] = [1] * btc['Open'].size
+btc['Volume'] = pd.to_numeric(data['volume'])
+
+
+class BitcoinSupertrend(Strategy):
+    length = 10
+    multiplier = 3
+    #trade_size = 0.1    # A % of our equity
+    
+    def init(self):
+        data_copy=pd.concat([btc, ta.overlap.supertrend(btc['High'], btc['Low'], btc['Close'], self.length, self.multiplier)], axis=1)
+        data_copy.columns = ['Open', 'High','Low','Close', 'Adj Close','Volume','Trend','Direction','Long','Short']
+        self.long  = self.I(lambda: data_copy['Long'])
+        self.short = self.I(lambda: data_copy['Short'])
+        
+    def next(self):
+        if self.long[-1] and not self.position.is_long:
+            self.buy()
+        elif self.short[-1] and self.position.is_long:
+            self.position.close()
+
+bt2 = Backtest(btc, BitcoinSupertrend, cash=1000000 ,commission=0.001, exclusive_orders=True)
+
+btcstats=bt2.run()
+bt2.plot()
+
+btc_trades=btcstats._trades
