@@ -24,6 +24,7 @@ Sajnos annak semmi értelme, hogy egy ilyen garázsprojektnél elkezdjem megcsin
 a személyreszabott backtesting frameworkömet, úgyhogy az egyetlen alternatíva: 
 
 !!!!!!!!!!          TALÁLNI EGY ÚJ KÖNYVTÁRAT           !!!!!!!!!!
+        (vagy csak hülye vagyok és meg kéne tanulni használni)
 
 Esetleg ezeken végigmenni? 
 https://github.com/kernc/backtesting.py/blob/master/doc/alternatives.md
@@ -124,6 +125,7 @@ import matplotlib.pyplot as plt
 
 # Convert multiindex series to dataframe
 # (AKA graph plotting magic)
+myTrades=stats._trades
 heatmap_df = heatmap.unstack()
 plt.figure(figsize=(10, 8))
 sns.heatmap(heatmap_df, annot=True, cmap='viridis', fmt='.0f')
@@ -133,7 +135,7 @@ plt.show()
 import pandas as pd
 import pandas_ta as ta
 from backtesting import Strategy, Backtest
-data = pd.read_csv("Bitcoin_prices.csv")
+data = yf.download("BTC-EUR", start="2013-06-01", end="2023-06-01")
 data['timestamp'] = pd.to_datetime(data['timestamp'], unit='ms')
 data.set_index(data['timestamp'], inplace=True)
 del data['timestamp']
@@ -144,28 +146,30 @@ btc['Low'] = pd.to_numeric(data['low'])
 btc['Close'] = pd.to_numeric(data['close'])
 btc['Adj Close'] = [1] * btc['Open'].size
 btc['Volume'] = pd.to_numeric(data['volume'])
-
+btc=btc[::-1]
 
 class BitcoinSupertrend(Strategy):
     length = 10
     multiplier = 3
-    #trade_size = 0.1    # A % of our equity
     
     def init(self):
-        data_copy=pd.concat([btc, ta.overlap.supertrend(btc['High'], btc['Low'], btc['Close'], self.length, self.multiplier)], axis=1)
-        data_copy.columns = ['Open', 'High','Low','Close', 'Adj Close','Volume','Trend','Direction','Long','Short']
-        self.long  = self.I(lambda: data_copy['Long'])
-        self.short = self.I(lambda: data_copy['Short'])
+        # Calculate supertrend and store it in the instance
+        self.data_copy = pd.concat([btc, ta.overlap.supertrend(btc['High'], btc['Low'], btc['Close'], self.length, self.multiplier)], axis=1)
+        self.data_copy.columns = ['Open', 'High','Low','Close', 'Adj Close','Volume','Trend','Direction','Long','Short']
+        self.long_signal = self.I(lambda: self.data_copy['Long'])
+        self.short_signal = self.I(lambda: self.data_copy['Short'])
         
     def next(self):
-        if self.long[-1] and not self.position.is_long:
+        # Check for long signal
+        if self.long_signal[-1] and not self.position.is_long:
             self.buy()
-        elif self.short[-1] and self.position.is_long:
+        # Check for short signal
+        elif self.short_signal[-1] and self.position.is_long:
             self.position.close()
 
-bt2 = Backtest(btc, BitcoinSupertrend, cash=1000000 ,commission=0.001, exclusive_orders=True)
-
-btcstats=bt2.run()
+# Run the backtest
+bt2 = Backtest(btc, BitcoinSupertrend, cash=1000000, commission=0.000)
+btcstats = bt2.run()
 bt2.plot()
 
-btc_trades=btcstats._trades
+btc_trades = btcstats._trades

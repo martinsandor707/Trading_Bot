@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import pandas_ta as ta
 from pandas_ta.overlap import supertrend as st
 from python_bitvavo_api.bitvavo import Bitvavo
 from datetime import datetime, timezone
@@ -62,12 +63,37 @@ data=downloaded_data.copy().iloc[::-1] #Reverse rows because bitvavo gives data 
     # Print the row string
 #    print(row_string)
 #%% Indicators
-length=10
-multiplier=3
+import yfinance as yf
+data = yf.download("BTC-EUR", start="2013-06-01", end="2023-06-01")
+data=data.drop('Adj Close', axis=1)
+data.columns = ['open', 'high','low','close','volume']
+
+length=21
+multiplier=5
 data=pd.concat([data, st(data['high'], data['low'], data['close'], length, multiplier)], axis=1)
 #data.dropna(inplace=True)
 data.columns = ['open', 'high','low','close','volume','trend','direction','long','short']
 data=data.iloc[length:]
+
+#heikin_ashi=ta.candles.ha(data.open,data.high,data.low,data.close)
+#heikin_ashi.columns=['Smooth_HA_Open', 'Smooth_HA_High', 'Smooth_HA_Low', 'Smooth_HA_Close']
+
+def smooth_heikin_ashi(ha, window=10):
+    ha.columns = ['HA_open','HA_high','HA_low','HA_close']
+    smooth_ha = pd.DataFrame(index=ha.index, columns=['Smooth_HA_Open', 'Smooth_HA_High', 'Smooth_HA_Low', 'Smooth_HA_Close'])
+    smooth_ha['Smooth_HA_Open'] = ha['HA_open'].rolling(window=window).mean()
+    smooth_ha['Smooth_HA_High'] = ha['HA_high'].rolling(window=window).mean()
+    smooth_ha['Smooth_HA_Low'] = ha['HA_low'].rolling(window=window).mean()
+    smooth_ha['Smooth_HA_Close'] = ha['HA_close'].rolling(window=window).mean()
+    
+    return smooth_ha
+
+#smooth_ha=smooth_heikin_ashi(heikin_ashi)
+
+#double_smoothed_ha=smooth_heikin_ashi(smooth_ha)
+
+#data=pd.concat([data, double_smoothed_ha], axis=1)
+#data.dropna(inplace=True)
 
 #%%
 ################################ Backtest ################################
@@ -83,10 +109,13 @@ buyhold = [] #Our wallet if we just spent all our money on coins in the beginnin
 
 
 def buy_condition(row):
-  return row['long'] and pd.isna(row['short'])
+  return row['long'] and pd.isna(row['short'])     #Supertrend strategy
+  #return row['Smooth_HA_Close'] > row['Smooth_HA_Open'] #Double-smoothed Heikin-Ashi
 
 def sell_condition(row):
-  return row['short'] and pd.isna(row['long'])
+  return row['short'] and pd.isna(row['long'])     #Supertrend
+  #return row['Smooth_HA_Close'] < row['Smooth_HA_Open'] #Double-smoothed Heikin-Ashi
+
 #Backtest loop
 
 for index, row in data.iterrows():
@@ -118,13 +147,13 @@ trades = pd.DataFrame(trades, columns=['Date', 'Action', 'Price', 'Coin', 'Eur',
 #Results
 print(f"\nStarting amount: {starting_eur} EUR")
 print(f"Buy-hold: \t\t\t\t {buyhold[-1]} EUR\t ({round((buyhold[-1]/starting_eur -1)*100,2)})% profit)")
-print(f"10-3 supertrend: \t\t {wallet[-1]} EUR\t ({round((wallet[-1]/starting_eur -1)*100,2)}% profit)")
+print(f"{length}-{multiplier} supertrend: \t\t {wallet[-1]} EUR\t ({round((wallet[-1]/starting_eur -1)*100,2)}% profit)")
 
 plt.figure(figsize=(10,6))
 plt.plot(
   data.index,
   wallet,
-  label="Wallet",
+  label="21-5 Supertrend",
   color="gold"
 )
 plt.plot(
