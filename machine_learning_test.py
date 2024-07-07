@@ -29,19 +29,21 @@ ami kiértékeli, hogy a model szerint a legfrissebb gyertyánál mit kéne lép
 #Download data
 ticker='SPY'
 spy = yf.download(ticker, start='2000-01-01', end='2010-01-01')
-
-#Calculate RSI for periods 2 to 24
-rsi_columns = []
-for i in range(2, 25):
-    rsi_col = f'RSI_{i}'
-    rsi_columns.append(rsi_col)
-    spy[rsi_col] = ta.rsi(spy['Close'], length=i)
+#Calculate Supertrend periods
+sti_columns = []
+for length in {7,10,15,20}:
+    for multiplier in {2,3,4,5}:
+        col_name = f'ST_Ratio_{length}_{multiplier}'
+        sti_columns.append(col_name)
+        supertrend=ta.overlap.supertrend(spy['High'], spy['Low'], spy['Close'], length=length, multiplier=multiplier)
+        #print(supertrend.tail())
+        spy[col_name]=spy['Close']/supertrend[f'SUPERT_{length}_{multiplier}.0']
     
-spy.dropna(inplace=True)
-
+spy=spy[20:]
+#%%
 #PCA
 pca = PCA(n_components=6)
-pca_data = pca.fit_transform(spy[rsi_columns])
+pca_data = pca.fit_transform(spy[sti_columns])
 lb =6
 
 # Least Squares Regression
@@ -67,11 +69,11 @@ predictions_df = pd.DataFrame({'Date': pred_dates, 'Prediction': pred})
 # Thresholds
 
 l_thresh = np.quantile(pred, 0.8)
-s_thresh = np.quantile(pred, 0.2)
+s_thresh = np.quantile(pred, 0.4)
 
 predictions_df['Signal'] = 0
 predictions_df.loc[predictions_df['Prediction'] > l_thresh, 'Signal'] = 1
-predictions_df.loc[predictions_df['Prediction'] < s_thresh, 'Signal'] = -1
+#predictions_df.loc[predictions_df['Prediction'] < s_thresh, 'Signal'] = -1
 
 # Aligning signals with daily returns
 aligned_signals = predictions_df.set_index('Date')['Signal'].reindex(spy.index).fillna(0).shift(1) #Shift signals
@@ -111,15 +113,18 @@ plt.show()
 spy_test = yf.download(ticker, start='2019-12-01', end='2023-01-01')
 
 #Calculate RSI for periods 2 to 24
-rsi_columns = []
-for i in range(2, 25):
-    rsi_col = f'RSI_{i}'
-    rsi_columns.append(rsi_col)
-    spy_test[rsi_col] = ta.rsi(spy_test['Close'], length=i)
+sti_columns = []
+for length in {7,10,15,20}:
+    for multiplier in {2,3,4,5}:
+        col_name = f'ST_Ratio_{length}_{multiplier}'
+        sti_columns.append(col_name)
+        supertrend=ta.overlap.supertrend(spy_test['High'], spy_test['Low'], spy_test['Close'], length=length, multiplier=multiplier)
+        #print(supertrend.tail())
+        spy_test[col_name]=spy_test['Close']/supertrend[f'SUPERT_{length}_{multiplier}.0'] 
     
-spy_test.dropna(inplace=True)
+spy_test=spy_test[20:]
 
-pca_data_test = pca.transform(spy_test[rsi_columns])
+pca_data_test = pca.transform(spy_test[sti_columns])
 
 pred_test = model.predict(pca_data_test)
 
@@ -135,12 +140,12 @@ predictions_test_df = pd.DataFrame({'Date': pred_dates_test, 'Prediction': pred_
 
 # Thresholds
 
-l_thresh_test = np.quantile(pred_test, 0.9)
-s_thresh_test = np.quantile(pred_test, 0.1)
+l_thresh_test = np.quantile(pred_test, 0.8)
+#s_thresh_test = np.quantile(pred_test, 0.4)
 
 predictions_test_df['Signal'] = 0
 predictions_test_df.loc[predictions_test_df['Prediction'] > l_thresh_test, 'Signal'] = 1
-predictions_test_df.loc[predictions_test_df['Prediction'] < s_thresh_test, 'Signal'] = -1
+#predictions_test_df.loc[predictions_test_df['Prediction'] < s_thresh_test, 'Signal'] = -1
 
 # Aligning signals with daily returns
 aligned_signals_test = predictions_test_df.set_index('Date')['Signal'].reindex(spy_test.index).fillna(0).shift(1) #Shift signals

@@ -2,7 +2,6 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import pandas_ta as ta
-from pandas_ta.overlap import supertrend as st
 from python_bitvavo_api.bitvavo import Bitvavo
 from datetime import datetime, timezone
 
@@ -64,19 +63,13 @@ data=downloaded_data.copy().iloc[::-1] #Reverse rows because bitvavo gives data 
 #    print(row_string)
 #%% Indicators
 import yfinance as yf
-data = yf.download("BTC-EUR", start="2013-06-01", end="2023-06-01")
-data=data.drop('Adj Close', axis=1)
-data.columns = ['open', 'high','low','close','volume']
+currency="BTC-EUR"
+#data = yf.download(currency, start="2023-07-05", end="2024-07-05")
+data=data.drop(['volume'], axis=1)
+data.columns = ['open', 'high','low','close']
 
-length=21
-multiplier=5
-data=pd.concat([data, st(data['high'], data['low'], data['close'], length, multiplier)], axis=1)
-#data.dropna(inplace=True)
-data.columns = ['open', 'high','low','close','volume','trend','direction','long','short']
-data=data.iloc[length:]
-
-#heikin_ashi=ta.candles.ha(data.open,data.high,data.low,data.close)
-#heikin_ashi.columns=['Smooth_HA_Open', 'Smooth_HA_High', 'Smooth_HA_Low', 'Smooth_HA_Close']
+heikin_ashi=ta.candles.ha(data.open,data.high,data.low,data.close)
+heikin_ashi.columns=['Smooth_HA_Open', 'Smooth_HA_High', 'Smooth_HA_Low', 'Smooth_HA_Close']
 
 def smooth_heikin_ashi(ha, window=10):
     ha.columns = ['HA_open','HA_high','HA_low','HA_close']
@@ -88,12 +81,25 @@ def smooth_heikin_ashi(ha, window=10):
     
     return smooth_ha
 
-#smooth_ha=smooth_heikin_ashi(heikin_ashi)
+smooth_ha=smooth_heikin_ashi(heikin_ashi)
+double_smoothed_ha=smooth_heikin_ashi(smooth_ha)
+data=pd.concat([data, double_smoothed_ha], axis=1)
 
-#double_smoothed_ha=smooth_heikin_ashi(smooth_ha)
 
-#data=pd.concat([data, double_smoothed_ha], axis=1)
-#data.dropna(inplace=True)
+rsi_length=3
+data[f'rsi_{rsi_length}'] = ta.momentum.rsi(data.close, length=rsi_length)
+data.dropna(inplace=True)
+
+
+
+length=10
+multiplier=3
+data=pd.concat([data, ta.overlap.supertrend(data['high'], data['low'], data['close'], length, multiplier)], axis=1)
+data=data.drop(['open', 'high', 'low', 'Smooth_HA_High', 'Smooth_HA_Low' ], axis=1)
+
+
+data.columns = ['close', 'Smooth_HA_Open', 'Smooth_HA_Close',f'rsi_{rsi_length}','trend','direction','long','short']
+data=data.iloc[length:]
 
 #%%
 ################################ Backtest ################################
@@ -109,11 +115,11 @@ buyhold = [] #Our wallet if we just spent all our money on coins in the beginnin
 
 
 def buy_condition(row):
-  return row['long'] and pd.isna(row['short'])     #Supertrend strategy
-  #return row['Smooth_HA_Close'] > row['Smooth_HA_Open'] #Double-smoothed Heikin-Ashi
+  return row['trend'] < row['close'] #and row[f'rsi_{rsi_length}'] > 30     #Supertrend strategy
+  #return row['Smooth_HA_Close'] > row['Smooth_HA_Open'] and row[f'rsi_{rsi_length}'] >=60 #Double-smoothed Heikin-Ashi
 
 def sell_condition(row):
-  return row['short'] and pd.isna(row['long'])     #Supertrend
+  return row['trend'] > row['close'] #and row[f'rsi_{rsi_length}'] <30     #Supertrend
   #return row['Smooth_HA_Close'] < row['Smooth_HA_Open'] #Double-smoothed Heikin-Ashi
 
 #Backtest loop
@@ -123,13 +129,13 @@ for index, row in data.iterrows():
   if buy_condition(row) and eur > 0:
     coin = eur / value * (1-trading_fees)
     eur = 0
-    trades.append({'Date': index, 'Action':'buy', 'Price':value, 'Coin':coin, 'Eur':eur, 'Wallet':coin*value})
+    trades.append({'Date': index, 'Action':'buy', 'Price':value, 'Coin':coin, 'Eur':eur, 'Wallet':coin*value, f'rsi_{rsi_length}': row[f'rsi_{rsi_length}']})
     print(f"Bought BTC at {value} EUR on the {index}")
 
-  if sell_condition(row) and coin > 0:
+  elif sell_condition(row) and coin > 0:
     eur = coin * value * (1-trading_fees)
     coin = 0
-    trades.append({'Date': index, 'Action':'sell', 'Price':value, 'Coin':coin, 'Eur':eur, 'Wallet':coin*value})
+    trades.append({'Date': index, 'Action':'sell', 'Price':value, 'Coin':coin, 'Eur':eur, 'Wallet':coin*value, f'rsi_{rsi_length}': row[f'rsi_{rsi_length}']})
     print(f"Sold BTC at {value} EUR on the {index}")
 
   if eur == 0:
@@ -139,7 +145,7 @@ for index, row in data.iterrows():
 
   buyhold.append(starting_eur / data['close'].iloc[0] * value)
 
-trades = pd.DataFrame(trades, columns=['Date', 'Action', 'Price', 'Coin', 'Eur', 'Wallet']).round(2) #convert to df
+trades = pd.DataFrame(trades, columns=['Date', 'Action', 'Price', 'Coin', 'Eur', 'Wallet', f'rsi_{rsi_length}']).round(2) #convert to df
 
 #print(trades['Action'].value_counts())
 
@@ -153,7 +159,7 @@ plt.figure(figsize=(10,6))
 plt.plot(
   data.index,
   wallet,
-  label="21-5 Supertrend",
+  label=f"{length}-{multiplier} Supertrend",
   color="gold"
 )
 plt.plot(
@@ -179,4 +185,5 @@ plt.ylabel("Value [EUR]", fontsize=20)
 plt.yticks(fontsize=14)
 plt.xlabel("Date", fontsize=20)
 plt.xticks(fontsize=14)
+plt.title(f"{currency}")
 plt.tight_layout()
