@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import pandas_ta as ta
+from pandas_ta.volatility import atr
 from python_bitvavo_api.bitvavo import Bitvavo
 from datetime import datetime, timezone
 
@@ -45,7 +46,65 @@ def load_df_from_csv(path:str):
   data['close'] = pd.to_numeric(data['close'])
   return data
 
-#%%
+def WMA(series, period):
+    weights = np.arange(1, period + 1)
+    return series.rolling(period).apply(lambda prices: np.dot(prices, weights) / weights.sum(), raw=True)
+
+def HMA(series, period):
+    half_length = period // 2
+    sqrt_length = int(np.sqrt(period))
+
+    wma_half_length = WMA(series, half_length)
+    wma_full_length = WMA(series, period)
+    hull_ma = WMA(2 * wma_half_length - wma_full_length, sqrt_length)
+
+    return hull_ma
+
+
+
+def MA_supertrend(high, low, close, length=10, multiplier=0.5, ma_length=150, offset=None, **kwargs):
+    """Indicator: Supertrended moving average (rewritten from the supertrend function of pandas_ta"""
+    # Validate Arguments
+    length = int(length) if length and length > 0 else 7
+    multiplier = float(multiplier) if multiplier and multiplier > 0 else 3.0
+    high = ta.utils.verify_series(high, length)
+    low = ta.utils.verify_series(low, length)
+    close = ta.utils.verify_series(close, length)
+    offset = ta.utils.get_offset(offset)
+
+    if high is None or low is None or close is None: return
+
+    # Calculate Results
+    m = close.size
+    dir_, trend = [1] * m, [0] * m
+    long, short = [np.nan] * m, [np.nan] * m
+
+    hl2_ = HMA(close,ma_length)
+    matr = multiplier * atr(high, low, close, length)
+    upperband = hl2_ + matr
+    lowerband = hl2_ - matr
+
+    for i in range(1, m):
+        if close.iloc[i] > upperband.iloc[i - 1]:
+            dir_[i] = 1
+        elif close.iloc[i] < lowerband.iloc[i - 1]:
+            dir_[i] = -1
+        else:
+            dir_[i] = dir_[i - 1]
+            if dir_[i] > 0 and lowerband.iloc[i] < lowerband.iloc[i - 1]:
+                lowerband.iloc[i] = lowerband.iloc[i - 1]
+            if dir_[i] < 0 and upperband.iloc[i] > upperband.iloc[i - 1]:
+                upperband.iloc[i] = upperband.iloc[i - 1]
+
+        if dir_[i] > 0:
+            trend[i] = long[i] = lowerband.iloc[i]
+        else:
+            trend[i] = short[i] = upperband.iloc[i]
+            
+    df = pd.DataFrame({f'MA_ST_{ma_length}': trend}, index=close.index)
+    return df
+
+#%% Download data
 #download_data()
 downloaded_data=load_df_from_csv("Bitcoin_prices.csv")
 data=downloaded_data.copy().iloc[::-1] #Reverse rows because bitvavo gives data from newest to oldest by default, we need the opposite
@@ -63,9 +122,12 @@ data=downloaded_data.copy().iloc[::-1] #Reverse rows because bitvavo gives data 
 #    print(row_string)
 #%% Indicators
 import yfinance as yf
-currency="BTC-EUR"
-#data = yf.download(currency, start="2023-07-05", end="2024-07-05")
-data=data.drop(['volume'], axis=1)
+currency="SOL-EUR"
+data_copy = yf.download(currency, start="2024-03-01", end="2024-05-01", interval='1h')
+
+#%%
+data=data_copy
+data=data.drop(['Adj Close', 'Volume'], axis=1)
 data.columns = ['open', 'high','low','close']
 
 heikin_ashi=ta.candles.ha(data.open,data.high,data.low,data.close)
@@ -83,25 +145,33 @@ def smooth_heikin_ashi(ha, window=10):
 
 smooth_ha=smooth_heikin_ashi(heikin_ashi)
 double_smoothed_ha=smooth_heikin_ashi(smooth_ha)
-data=pd.concat([data, double_smoothed_ha], axis=1)
+#data=pd.concat([data, double_smoothed_ha], axis=1)
 
 
-rsi_length=3
+rsi_length=5
 data[f'rsi_{rsi_length}'] = ta.momentum.rsi(data.close, length=rsi_length)
-data.dropna(inplace=True)
+
+#data.dropna(inplace=True)
 
 
 
 length=10
-multiplier=3
-data=pd.concat([data, ta.overlap.supertrend(data['high'], data['low'], data['close'], length, multiplier)], axis=1)
-data=data.drop(['open', 'high', 'low', 'Smooth_HA_High', 'Smooth_HA_Low' ], axis=1)
+multiplier=1
+ma_length=150
+#data=pd.concat([data, ta.overlap.supertrend(data['high'], data['low'], data['close'], length, multiplier)], axis=1)
+data=pd.concat([data,MA_supertrend(data['high'], data['low'], data['close'], length=length, multiplier=multiplier, ma_length=ma_length)], axis=1)
+#data=data.drop(['open', 'high', 'low', 'Smooth_HA_High', 'Smooth_HA_Low' ], axis=1)
+data[f'ATR_{length}']=atr(data['high'], data['low'], data['close'], length)
+data=data.drop(['open', 'high', 'low'], axis=1)
 
 
-data.columns = ['close', 'Smooth_HA_Open', 'Smooth_HA_Close',f'rsi_{rsi_length}','trend','direction','long','short']
-data=data.iloc[length:]
+#data.columns = ['close', 'Smooth_HA_Open', 'Smooth_HA_Close',f'rsi_{rsi_length}','trend','direction','long','short']
+data.columns = ['close', f'rsi_{rsi_length}', 'trend', f'ATR_{length}']
 
-#%%
+prev_row = data.iloc[length+ma_length]
+data=data.iloc[length+ma_length+1:]
+
+#%% Backtesting loop
 ################################ Backtest ################################
 starting_eur = 1000
 staring_coin = 0
@@ -114,43 +184,49 @@ wallet = []
 buyhold = [] #Our wallet if we just spent all our money on coins in the beginning and did no trades
 
 
+
+
 def buy_condition(row):
-  return row['trend'] < row['close'] #and row[f'rsi_{rsi_length}'] > 30     #Supertrend strategy
-  #return row['Smooth_HA_Close'] > row['Smooth_HA_Open'] and row[f'rsi_{rsi_length}'] >=60 #Double-smoothed Heikin-Ashi
-
+  #return row['trend'] < row['close'] and prev_row['trend'] > prev_row['close'] #and row[f'rsi_{rsi_length}'] > 30     #Supertrend strategy
+  #return row['Smooth_HA_Close'] > row['Smooth_HA_Open'] #and row[f'rsi_{rsi_length}'] >=60 #Double-smoothed Heikin-Ashi
+  return row[f'rsi_{rsi_length}'] <= 19
 def sell_condition(row):
-  return row['trend'] > row['close'] #and row[f'rsi_{rsi_length}'] <30     #Supertrend
+  #return row['close'] < trades[-1]['stop_loss'] or row['close'] > trades[-1]['take_profit']  #and row[f'rsi_{rsi_length}'] <30     #Supertrend
   #return row['Smooth_HA_Close'] < row['Smooth_HA_Open'] #Double-smoothed Heikin-Ashi
-
+  return row[f'rsi_{rsi_length}'] >= 81
+  
 #Backtest loop
 
 for index, row in data.iterrows():
+    
   value = row['close']
   if buy_condition(row) and eur > 0:
     coin = eur / value * (1-trading_fees)
     eur = 0
-    trades.append({'Date': index, 'Action':'buy', 'Price':value, 'Coin':coin, 'Eur':eur, 'Wallet':coin*value, f'rsi_{rsi_length}': row[f'rsi_{rsi_length}']})
+    take_profit = (row[f'ATR_{length}']/100*3+1)*value
+    stop_loss = (1-row[f'ATR_{length}']/100*2)*value
+    trades.append({'Date': index, 'Action':'buy', 'Price':value, 'Coin':coin, 'Eur':eur, 'Wallet':coin*value, f'rsi_{rsi_length}': row[f'rsi_{rsi_length}'], 'take_profit': take_profit, 'stop_loss': stop_loss})
     print(f"Bought BTC at {value} EUR on the {index}")
 
-  elif sell_condition(row) and coin > 0:
+  elif trades and trades[-1]['Action'] == 'buy' and sell_condition(row) and coin > 0:
     eur = coin * value * (1-trading_fees)
     coin = 0
-    trades.append({'Date': index, 'Action':'sell', 'Price':value, 'Coin':coin, 'Eur':eur, 'Wallet':coin*value, f'rsi_{rsi_length}': row[f'rsi_{rsi_length}']})
+    trades.append({'Date': index, 'Action':'sell', 'Price':value, 'Coin':coin, 'Eur':eur, 'Wallet':coin*value, f'rsi_{rsi_length}': row[f'rsi_{rsi_length}'], 'take_profit': take_profit, 'stop_loss': stop_loss})
     print(f"Sold BTC at {value} EUR on the {index}")
 
   if eur == 0:
     wallet.append(coin*value)
   else:
     wallet.append(eur)
+    
+  prev_row = row
 
   buyhold.append(starting_eur / data['close'].iloc[0] * value)
 
-trades = pd.DataFrame(trades, columns=['Date', 'Action', 'Price', 'Coin', 'Eur', 'Wallet', f'rsi_{rsi_length}']).round(2) #convert to df
+trades = pd.DataFrame(trades, columns=['Date', 'Action', 'Price', 'Coin', 'Eur', 'Wallet', f'rsi_{rsi_length}', 'take_profit', 'stop_loss']).round(2) #convert to df
 
 #print(trades['Action'].value_counts())
-
-#%%
-#Results
+#%% Results
 print(f"\nStarting amount: {starting_eur} EUR")
 print(f"Buy-hold: \t\t\t\t {buyhold[-1]} EUR\t ({round((buyhold[-1]/starting_eur -1)*100,2)})% profit)")
 print(f"{length}-{multiplier} supertrend: \t\t {wallet[-1]} EUR\t ({round((wallet[-1]/starting_eur -1)*100,2)}% profit)")
