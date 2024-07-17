@@ -39,7 +39,7 @@ path="microsoft_stock_prices.csv"
 
 #%% Downloading new data
 # Get data for the last 10 years
-data = yf.download("MSFT", start="2013-06-01", end="2023-06-01")
+data = yf.download("BTC-EUR", start="2018-06-01", end="2023-06-01")
 
 # Display the first few rows of the data
 print(data.head())
@@ -91,8 +91,9 @@ class BasicSupertrend(Strategy):
     trade_size = 0.1    # A % of our equity
     
     def init(self):
-        data_copy=pd.concat([data, ta.overlap.supertrend(data['High'], data['Low'], data['Close'], self.length, self.multiplier)], axis=1)
-        data_copy.columns = ['Open', 'High','Low','Close', 'Adj Close','Volume','Trend','Direction','Long','Short']
+        data_copy = self.data.df.copy()
+        data_copy=pd.concat([data_copy, ta.overlap.supertrend(data_copy['High'], data_copy['Low'], data_copy['Close'], self.length, self.multiplier)], axis=1)
+        data_copy.columns = ['Open', 'High','Low','Close', 'Pip','Volume','Trend','Direction','Long','Short']
         self.long  = self.I(lambda: data_copy['Long'])
         self.short = self.I(lambda: data_copy['Short'])
         
@@ -104,7 +105,7 @@ class BasicSupertrend(Strategy):
             if len(self.trades) == 0:
                     self.buy(size=self.trade_size)   # Enter a long
                     
-        elif pd.isna(self.long[-1]) and self.short[-1] and self.long[-2] and pd.isna(self.short[-2]):
+        elif self.short[-1] :
             for trade in self.trades:
                 if trade.is_long:
                     trade.close()               # Exit all longs
