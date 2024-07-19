@@ -122,8 +122,8 @@ data=downloaded_data.copy().iloc[::-1] #Reverse rows because bitvavo gives data 
 #    print(row_string)
 #%% Indicators
 import yfinance as yf
-currency="SOL-EUR"
-data_copy = yf.download(currency, start="2024-03-01", end="2024-05-01", interval='1h')
+currency="PEPE24478-USD"
+data_copy = yf.download(currency, start="2024-05-22", end="2024-07-19", interval='30m')
 
 #%%
 data=data_copy
@@ -143,8 +143,8 @@ def smooth_heikin_ashi(ha, window=10):
     
     return smooth_ha
 
-smooth_ha=smooth_heikin_ashi(heikin_ashi)
-double_smoothed_ha=smooth_heikin_ashi(smooth_ha)
+#smooth_ha=smooth_heikin_ashi(heikin_ashi)
+#double_smoothed_ha=smooth_heikin_ashi(smooth_ha)
 #data=pd.concat([data, double_smoothed_ha], axis=1)
 
 
@@ -155,21 +155,21 @@ data[f'rsi_{rsi_length}'] = ta.momentum.rsi(data.close, length=rsi_length)
 
 
 
-length=10
-multiplier=1
-ma_length=150
-#data=pd.concat([data, ta.overlap.supertrend(data['high'], data['low'], data['close'], length, multiplier)], axis=1)
-data=pd.concat([data,MA_supertrend(data['high'], data['low'], data['close'], length=length, multiplier=multiplier, ma_length=ma_length)], axis=1)
+length=20
+multiplier=4.0
+#ma_length=150
+data=pd.concat([data, ta.overlap.supertrend(heikin_ashi['Smooth_HA_High'], heikin_ashi['Smooth_HA_Low'], heikin_ashi['Smooth_HA_Close'], length, multiplier)[f'SUPERT_{length}_{multiplier}']], axis=1)
+#data=pd.concat([data,MA_supertrend(data['high'], data['low'], data['close'], length=length, multiplier=multiplier, ma_length=ma_length)], axis=1)
 #data=data.drop(['open', 'high', 'low', 'Smooth_HA_High', 'Smooth_HA_Low' ], axis=1)
-data[f'ATR_{length}']=atr(data['high'], data['low'], data['close'], length)
+#data[f'ATR_{length}']=atr(data['high'], data['low'], data['close'], length)
 data=data.drop(['open', 'high', 'low'], axis=1)
 
 
 #data.columns = ['close', 'Smooth_HA_Open', 'Smooth_HA_Close',f'rsi_{rsi_length}','trend','direction','long','short']
-data.columns = ['close', f'rsi_{rsi_length}', 'trend', f'ATR_{length}']
+data.columns = ['close', f'rsi_{rsi_length}', 'trend']
 
-prev_row = data.iloc[length+ma_length]
-data=data.iloc[length+ma_length+1:]
+prev_row = data.iloc[length]
+data=data.iloc[length+1:]
 
 #%% Backtesting loop
 ################################ Backtest ################################
@@ -182,18 +182,19 @@ coin = staring_coin
 trades = []
 wallet = []
 buyhold = [] #Our wallet if we just spent all our money on coins in the beginning and did no trades
+is_first_trade = True
 
 
 
 
 def buy_condition(row):
-  #return row['trend'] < row['close'] and prev_row['trend'] > prev_row['close'] #and row[f'rsi_{rsi_length}'] > 30     #Supertrend strategy
+  return row['trend'] < row['close'] and (prev_row['trend'] > prev_row['close'] or is_first_trade) #and row[f'rsi_{rsi_length}'] > 30     #Supertrend strategy
   #return row['Smooth_HA_Close'] > row['Smooth_HA_Open'] #and row[f'rsi_{rsi_length}'] >=60 #Double-smoothed Heikin-Ashi
-  return row[f'rsi_{rsi_length}'] <= 19
+  #return row[f'rsi_{rsi_length}'] <= 19
 def sell_condition(row):
-  #return row['close'] < trades[-1]['stop_loss'] or row['close'] > trades[-1]['take_profit']  #and row[f'rsi_{rsi_length}'] <30     #Supertrend
+  return row['trend'] > row['close'] and prev_row['trend'] < prev_row['close']     #Supertrend
   #return row['Smooth_HA_Close'] < row['Smooth_HA_Open'] #Double-smoothed Heikin-Ashi
-  return row[f'rsi_{rsi_length}'] >= 81
+  #return row[f'rsi_{rsi_length}'] >= 81
   
 #Backtest loop
 
@@ -203,15 +204,15 @@ for index, row in data.iterrows():
   if buy_condition(row) and eur > 0:
     coin = eur / value * (1-trading_fees)
     eur = 0
-    take_profit = (row[f'ATR_{length}']/100*3+1)*value
-    stop_loss = (1-row[f'ATR_{length}']/100*2)*value
-    trades.append({'Date': index, 'Action':'buy', 'Price':value, 'Coin':coin, 'Eur':eur, 'Wallet':coin*value, f'rsi_{rsi_length}': row[f'rsi_{rsi_length}'], 'take_profit': take_profit, 'stop_loss': stop_loss})
+    #take_profit = (row[f'ATR_{length}']/100*3+1)*value
+    #stop_loss = (1-row[f'ATR_{length}']/100*2)*value
+    trades.append({'Date': index, 'Action':'buy', 'Price':value, 'Coin':coin, 'Eur':eur, 'Wallet':coin*value, f'rsi_{rsi_length}': row[f'rsi_{rsi_length}']})
     print(f"Bought BTC at {value} EUR on the {index}")
 
   elif trades and trades[-1]['Action'] == 'buy' and sell_condition(row) and coin > 0:
     eur = coin * value * (1-trading_fees)
     coin = 0
-    trades.append({'Date': index, 'Action':'sell', 'Price':value, 'Coin':coin, 'Eur':eur, 'Wallet':coin*value, f'rsi_{rsi_length}': row[f'rsi_{rsi_length}'], 'take_profit': take_profit, 'stop_loss': stop_loss})
+    trades.append({'Date': index, 'Action':'sell', 'Price':value, 'Coin':coin, 'Eur':eur, 'Wallet':coin*value, f'rsi_{rsi_length}': row[f'rsi_{rsi_length}']})
     print(f"Sold BTC at {value} EUR on the {index}")
 
   if eur == 0:
