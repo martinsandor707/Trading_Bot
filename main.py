@@ -27,7 +27,7 @@ def download_data():
   bitvavo = Bitvavo()
   start = datetime(year=2018, month=6, day=30, hour=0, minute=0, tzinfo=timezone.utc)
   end   = datetime(year=2023, month=6, day=30, hour=0, minute=0, tzinfo=timezone.utc)
-  candles = bitvavo.candles('BTC-EUR', '1d', start=start, end=end)
+  candles = bitvavo.candles('PEPE-EUR', '30m')#, start=start, end=end)
   data=pd.DataFrame(candles, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
   data.set_index(data['timestamp'], inplace=True)
   del data['timestamp']
@@ -105,7 +105,7 @@ def MA_supertrend(high, low, close, length=10, multiplier=0.5, ma_length=150, of
     return df
 
 #%% Download data
-#download_data()
+download_data()
 downloaded_data=load_df_from_csv("Bitcoin_prices.csv")
 data=downloaded_data.copy().iloc[::-1] #Reverse rows because bitvavo gives data from newest to oldest by default, we need the opposite
 
@@ -126,8 +126,8 @@ currency="PEPE24478-USD"
 data_copy = yf.download(currency, start="2024-05-22", end="2024-07-19", interval='30m')
 
 #%%
-data=data_copy
-data=data.drop(['Adj Close', 'Volume'], axis=1)
+#data=data_copy
+data=data.drop(['volume'], axis=1)
 data.columns = ['open', 'high','low','close']
 
 heikin_ashi=ta.candles.ha(data.open,data.high,data.low,data.close)
@@ -204,6 +204,7 @@ for index, row in data.iterrows():
   if buy_condition(row) and eur > 0:
     coin = eur / value * (1-trading_fees)
     eur = 0
+    is_first_trade = False
     #take_profit = (row[f'ATR_{length}']/100*3+1)*value
     #stop_loss = (1-row[f'ATR_{length}']/100*2)*value
     trades.append({'Date': index, 'Action':'buy', 'Price':value, 'Coin':coin, 'Eur':eur, 'Wallet':coin*value, f'rsi_{rsi_length}': row[f'rsi_{rsi_length}']})
@@ -257,6 +258,27 @@ for index, row in trades.iterrows():
             row['Date'],
             row['Eur'] * 0.95,
             color="red")
+plt.legend(fontsize=18, loc="upper left")
+plt.ylabel("Value [EUR]", fontsize=20)
+plt.yticks(fontsize=14)
+plt.xlabel("Date", fontsize=20)
+plt.xticks(fontsize=14)
+plt.title(f"{currency}")
+plt.tight_layout()
+#%%
+plt.figure(figsize=(10,6))
+plt.plot(
+  data.index,
+  data['trend'],
+  label=f"{length}-{multiplier} Supertrend",
+  color="gold"
+)
+plt.plot(
+  data.index,
+  data['close'],
+  label="Price",
+  color="purple"
+)
 plt.legend(fontsize=18, loc="upper left")
 plt.ylabel("Value [EUR]", fontsize=20)
 plt.yticks(fontsize=14)

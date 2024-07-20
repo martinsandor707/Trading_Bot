@@ -5,7 +5,9 @@ Created on Thu Jul 18 17:36:21 2024
 @author: marti
 """
 import time
+from datetime import datetime, timezone
 import json
+import csv
 import warnings
 import numpy as np
 import pandas as pd
@@ -29,6 +31,7 @@ class Bitvavo_Supertrend:
     """
     base_currency = None
     quote_currency = None
+    my_trades = []
     
     def __init__(self, ticker, period, st_length, st_factor):
         keys=json.load(open("api.keys"))
@@ -51,11 +54,10 @@ class Bitvavo_Supertrend:
     def error_callback(self, error):
         print("Errors:", json.dumps(error, indent=2))
         
-    # Retrieve the data you need from Bitvavo in order to implement your
-    # trading logic. Use multiple workflows to return data to your
-    # callbacks.
-    def a_trading_strategy(self):
-        data = self.get_data(self.ticker, self.period)
+    # Retrieve the data you need from Bitvavo
+    # Buy and sell based on Heikin Ashi supertrend signals
+    async def a_trading_strategy(self):
+        data = await self.get_data(self.ticker, self.period)
         print(f"Downloaded latest candle chart for {self.ticker} with a period of {self.period}")
         signal = self.print_signal(data)
         if signal == 'Buy':
@@ -64,9 +66,13 @@ class Bitvavo_Supertrend:
             balance_response = bvavo.bitvavo_engine.balance({'symbol': f'{self.quote_currency}'})
             print(f"Wallet details received for {self.quote_currency}")
             
-            amount_to_buy = str(balance_response[0]['available']*self.margin)
-            order_response = bvavo.bitvavo_engine.placeOrder(self.ticker, "buy", "market", {'amountQuote' : amount_to_buy*0.5})
+            amount_to_buy = str(round(float(balance_response[0]['available'])*self.margin, 2))
+            if float(amount_to_buy) < 5:
+                print(f"Not enough {self.quote_currency} to buy {self.base_currency}")
+                return
+            order_response = bvavo.bitvavo_engine.placeOrder(self.ticker, "buy", "market", {'amountQuote' : amount_to_buy})
             if order_response['orderId'] is not None:
+                self.my_trades.append({'Date': order_response['created'], 'Side': order_response['side'], 'AmountQuote': amount_to_buy})
                 print(f"Successfully bought {self.base_currency} for {amount_to_buy} {self.quote_currency}")
                 
             
@@ -77,14 +83,21 @@ class Bitvavo_Supertrend:
             print(f"Wallet details received for {self.base_currency}")
             
             amount_to_sell = balance_response[0]['available']
+            if float(amount_to_sell) <= 0:
+                print(f"No {self.base_currency} to sell")
+                return
             order_response = bvavo.bitvavo_engine.placeOrder(self.ticker, "sell", "market", {'amount': amount_to_sell})
             if order_response['orderId'] is not None:
+                self.my_trades.append({'Date': order_response['created'], 'Side': order_response['side'], 'AmountQuote': round(float(amount_to_sell)*float(self.bitvavo_engine.tickerPrice({'market':self.ticker})[0]['price']), 2)})
                 print(f"Successfully bought {self.base_currency} for {amount_to_sell} {self.quote_currency}")
                 
-                
         else:
-            #print(f"{data.iloc[-1].name} If this weren't a test run, I would have done nothing anyway")
-            print(f"{data.iloc[-1].name} No signal")
+            trend = data.iloc[-1][f'ST_{self.st_length}_{self.st_factor}'] < data.iloc[-1]['close']
+            if trend:
+                print("The market seems to be bullish")
+            else:
+                print("The market seems to be bearish")
+            print(f"Supertrend value: {data.iloc[-1][f'ST_{self.st_length}_{self.st_factor}']}")
     
     def print_signal(self, data):
         if self.buy_condition(data):
@@ -126,6 +139,7 @@ class Bitvavo_Supertrend:
         for trade in trades:
             if last_trade is not None and trade['Action'] == 'Sell' and last_trade['Action'] == 'Buy':
                 profit_pct = profit_pct * (trade['Price']/last_trade['Price'])
+                print(profit_pct)
             last_trade = trade
         print(f"Profit in the past {len(data)} periods is {(profit_pct-1)*100}%")
         
@@ -135,8 +149,8 @@ class Bitvavo_Supertrend:
         Calculates the supertrend based on heikin-ashi candles, and appends
         it to the end of the dataframe.
     """
-    def get_data(self, ticker, period):
-        data=self.bitvavo_engine.candles(ticker, period)
+    async def get_data(self, ticker, period):
+        data=await self.bitvavo_engine.candles(ticker, period)
         data=pd.DataFrame(data, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
         data['timestamp'] = pd.to_datetime(data['timestamp'], unit='ms')
         data.set_index(data['timestamp'], inplace=True)
@@ -155,24 +169,48 @@ class Bitvavo_Supertrend:
         data.columns = ['open', 'high', 'low', 'close', 'volume', f'ST_{self.st_length}_{self.st_factor}']
         
         return data.iloc[self.st_length:]
+    
+    def write_trades_to_csv(self):
+        # If the file doesn't exist, it will be created automatically
+        with open('my_trade_history.csv', 'a', newline='') as file:
+            writer = csv.DictWriter(file, fieldnames=self.my_trades[0].keys())
+            
+            #Write header only if the file is empty
+            file.seek(0,2)
+            if file.tell() == 0:
+                writer.writeheader()
+                
+            writer.writerows(self.my_trades)
+            print("Data has been appended to 'my_trade_history.csv' file ")
         
     
 ############################ Class ends here ############################
 warnings.simplefilter(action='ignore')
 ticker="PEPE-EUR"
 period = "30m"
-bvavo = Bitvavo_Supertrend(ticker=ticker, period=period, st_length= 20, st_factor=4.0)
+atr_length = 20
+multiplier = 4.0
+bvavo = Bitvavo_Supertrend(ticker=ticker, period=period, st_length=atr_length, st_factor=multiplier)
+#bvavo.print_all_signals(bvavo.get_data(ticker, period))
 
+#%%
 try:
+    print(f"{ticker} Heikin-Ashi Supertrend trading bot started with the following the following parameters:\n\tATR length: {atr_length} \n\tMultiplier: {multiplier}")
+    print("------------------------------------------------------------------------")
     while True:
+        print("The current UTC time is: ", datetime.now(timezone.utc))
         bvavo.a_trading_strategy()
-        print(bvavo.bitvavo_engine.getRemainingLimit())
+        print(f"Remaining API calls this minute: {bvavo.bitvavo_engine.getRemainingLimit()}")
         print("------------------------------------------------------------------------")
-        time.sleep(10)
+        time.sleep(60*30)
 except KeyboardInterrupt:
     print("Program interupted by user")
     
 finally:
+    if bvavo.my_trades:
+        bvavo.write_trades_to_csv()
+    else:
+        print("No trades have been made")
     print("Finally closing websocket")
     bvavo.bitvavo_socket.closeSocket()
 
@@ -180,3 +218,4 @@ finally:
 
 #%% Testing area
 #bvavo.print_all_signals(bvavo.get_data(ticker, period))
+#data=bvavo.get_data(ticker, period)
